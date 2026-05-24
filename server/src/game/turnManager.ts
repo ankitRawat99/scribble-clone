@@ -1,6 +1,6 @@
 import { GAME_CONSTANTS } from "./game.constants";
-import { getRandomWord } from "./wordManager";
-import { Room, GameStatus, Player } from "../types/room.types";
+import { getRandomWordOptions } from "./wordManager";
+import { Room, GameStatus, Player, TurnPhase } from "../types/room.types";
 
 export function getNextDrawer(room: Room): Player | null {
   if (room.players.length === 0) return null;
@@ -15,7 +15,10 @@ export function resetTurnState(room: Room): Room {
   room.maxRounds = GAME_CONSTANTS.MAX_ROUNDS;
   room.currentDrawerId = null;
   room.currentWord = null;
+  room.currentWordOptions = [];
+  room.currentPhase = null;
   room.turnEndsAt = null;
+  room.phaseEndsAt = null;
   room.guessedPlayerIds = [];
 
   return room;
@@ -33,11 +36,44 @@ export function startNextTurn(room: Room): { success: boolean; room?: Room; erro
 
   room.status = GameStatus.PLAYING;
   room.currentDrawerId = nextDrawer.id;
-  room.currentWord = getRandomWord();
-  room.turnEndsAt = Date.now() + GAME_CONSTANTS.TURN_DURATION_SECONDS * 1000;
+  room.currentWord = null;
+  room.currentWordOptions = getRandomWordOptions(3);
+  room.currentPhase = TurnPhase.CHOOSING_WORD;
+  room.turnEndsAt = null;
+  room.phaseEndsAt = Date.now() + GAME_CONSTANTS.WORD_SELECTION_SECONDS * 1000;
   room.guessedPlayerIds = [];
 
   return { success: true, room };
+}
+
+export function startDrawingPhase(
+  room: Room,
+  selectedWord: string
+): { success: boolean; room?: Room; error?: string } {
+  if (room.currentPhase !== TurnPhase.CHOOSING_WORD) {
+    return { success: false, error: "Room is not choosing a word" };
+  }
+
+  if (!room.currentWordOptions.includes(selectedWord)) {
+    return { success: false, error: "Selected word was not offered" };
+  }
+
+  room.currentWord = selectedWord;
+  room.currentPhase = TurnPhase.DRAWING;
+  room.turnEndsAt = Date.now() + GAME_CONSTANTS.TURN_DURATION_SECONDS * 1000;
+  room.phaseEndsAt = room.turnEndsAt;
+  room.guessedPlayerIds = [];
+
+  return { success: true, room };
+}
+
+export function startRoundEndPhase(room: Room): Room {
+  room.currentPhase = TurnPhase.ROUND_ENDED;
+  room.currentWordOptions = [];
+  room.turnEndsAt = null;
+  room.phaseEndsAt = Date.now() + GAME_CONSTANTS.ROUND_END_SECONDS * 1000;
+
+  return room;
 }
 
 export function advanceTurn(room: Room): { success: boolean; room?: Room; error?: string } {
@@ -55,7 +91,10 @@ export function advanceTurn(room: Room): { success: boolean; room?: Room; error?
     room.status = GameStatus.FINISHED;
     room.currentDrawerId = null;
     room.currentWord = null;
+    room.currentWordOptions = [];
+    room.currentPhase = null;
     room.turnEndsAt = null;
+    room.phaseEndsAt = null;
     room.guessedPlayerIds = [];
 
     return { success: true, room };

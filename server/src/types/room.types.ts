@@ -13,16 +13,25 @@ export interface Player {
   score: number;
 }
 
+export enum TurnPhase {
+  CHOOSING_WORD = "choosing-word",
+  DRAWING = "drawing",
+  ROUND_ENDED = "round-ended",
+}
+
 export interface Room {
   id: string;
   players: Player[];
   hostId: string; // ID of the host/room creator
   currentDrawerId: string | null; // Active drawing authority
   currentWord: string | null; // Secret word; never broadcast to all clients
+  currentWordOptions: string[];
+  currentPhase: TurnPhase | null;
   currentTurnIndex: number;
   currentRound: number;
   maxRounds: number;
   turnEndsAt: number | null;
+  phaseEndsAt: number | null;
   guessedPlayerIds: string[];
   status: GameStatus; // Game state: waiting, starting, playing, finished
   createdAt: number; // Timestamp for debugging

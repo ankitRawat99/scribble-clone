@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import AppShell from "./components/layout/AppShell";
-import type { ChatMessage, Room, WordState } from "./game/game.types";
+import type { ChatMessage, Room, WordOptionsState, WordState } from "./game/game.types";
 import GameScreen from "./game/GameScreen";
 import ResultScreen from "./screens/ResultScreen";
 import LobbyScreen from "./screens/LobbyScreen";
@@ -20,6 +20,8 @@ function App() {
   const [remainingSeconds, setRemainingSeconds] = useState(60);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [wordState, setWordState] = useState<WordState>({ word: null, isDrawer: false });
+  const [wordOptions, setWordOptions] = useState<WordOptionsState>({ options: [], remainingSeconds: 0 });
+  const [revealedWord, setRevealedWord] = useState<string | null>(null);
 
   const isHost = Boolean(room && room.hostId === socket.id);
 
@@ -43,6 +45,8 @@ function App() {
     const handleGameStarted = (updatedRoom: Room) => {
       setRoom(updatedRoom);
       setMessages([]);
+      setWordOptions({ options: [], remainingSeconds: 0 });
+      setRevealedWord(null);
       setScreen("playing");
       setError("");
       setIsLoading(false);
@@ -51,6 +55,8 @@ function App() {
     const handleGameFinished = (updatedRoom: Room) => {
       setRoom(updatedRoom);
       setWordState({ word: null, isDrawer: false });
+      setWordOptions({ options: [], remainingSeconds: 0 });
+      setRevealedWord(null);
       setScreen("finished");
     };
 
@@ -59,6 +65,8 @@ function App() {
       setScreen("lobby");
       setMessages([]);
       setWordState({ word: null, isDrawer: false });
+      setWordOptions({ options: [], remainingSeconds: 0 });
+      setRevealedWord(null);
       setError("");
       setIsLoading(false);
     };
@@ -71,6 +79,15 @@ function App() {
     socket.on("game-finished", handleGameFinished);
     socket.on("room-left", handleRoomLeft);
     socket.on("word-updated", setWordState);
+    socket.on("word-options", (optionsState: WordOptionsState) => {
+      setWordOptions(optionsState);
+      setRevealedWord(null);
+    });
+    socket.on("round-ended", ({ word }: { word: string | null }) => {
+      setRevealedWord(word);
+      setWordOptions({ options: [], remainingSeconds: 0 });
+      setWordState({ word, isDrawer: false });
+    });
     socket.on("timer-updated", ({ remainingSeconds: seconds }: { remainingSeconds: number }) => {
       setRemainingSeconds(seconds);
     });
@@ -91,6 +108,8 @@ function App() {
       socket.off("game-finished", handleGameFinished);
       socket.off("room-left", handleRoomLeft);
       socket.off("word-updated", setWordState);
+      socket.off("word-options");
+      socket.off("round-ended");
       socket.off("timer-updated");
       socket.off("chat-message");
       socket.off("room-error");
@@ -140,7 +159,13 @@ function App() {
   };
 
   const handleSubmitGuess = (guess: string) => {
-    socket.emit("submit-guess", { guess });
+    if (!room) return;
+    socket.emit("submit-guess", { roomId: room.id, guess });
+  };
+
+  const handleSelectWord = (selectedWord: string) => {
+    if (!room) return;
+    socket.emit("select-word", { roomId: room.id, selectedWord });
   };
 
   return (
@@ -150,10 +175,13 @@ function App() {
           room={room}
           isHost={isHost}
           wordState={wordState}
+          wordOptions={wordOptions}
+          revealedWord={revealedWord}
           messages={messages}
           remainingSeconds={remainingSeconds}
           onLeaveRoom={handleLeaveRoom}
           onSubmitGuess={handleSubmitGuess}
+          onSelectWord={handleSelectWord}
         />
       ) : screen === "finished" && room ? (
         <ResultScreen room={room} onPlayAgain={handleLeaveRoom} />

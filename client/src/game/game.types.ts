@@ -1,4 +1,5 @@
 export type GameStatus = "waiting" | "starting" | "playing" | "finished";
+export type TurnPhase = "choosing-word" | "drawing" | "round-ended" | null;
 
 export interface Player {
   id: string;
@@ -13,10 +14,13 @@ export interface Room {
   hostId: string;
   currentDrawerId: string | null;
   currentWord: string | null;
+  currentWordOptions: string[];
+  currentPhase: TurnPhase;
   currentTurnIndex: number;
   currentRound: number;
   maxRounds: number;
   turnEndsAt: number | null;
+  phaseEndsAt: number | null;
   guessedPlayerIds: string[];
   status: GameStatus;
   createdAt: number;
@@ -25,6 +29,11 @@ export interface Room {
 export interface WordState {
   word: string | null;
   isDrawer: boolean;
+}
+
+export interface WordOptionsState {
+  options: string[];
+  remainingSeconds: number;
 }
 
 export interface ChatMessage {

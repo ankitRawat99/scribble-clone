@@ -4,14 +4,15 @@ import * as gameManager from "../rooms/gameManager";
 import * as turnManager from "../game/turnManager";
 import { GAME_CONSTANTS } from "../game/game.constants";
 import { getHiddenWord } from "../game/wordManager";
-import { ChatMessage, GameStatus, Player, Room } from "../types/room.types";
+import { ChatMessage, GameStatus, Player, Room, TurnPhase } from "../types/room.types";
 
-const turnTimers = new Map<string, NodeJS.Timeout>();
+const phaseTimers = new Map<string, NodeJS.Timeout>();
 
 function createPublicRoomState(room: Room): Room {
   return {
     ...room,
     currentWord: null,
+    currentWordOptions: [],
   };
 }
 
@@ -31,6 +32,15 @@ function emitWordState(io: Server, room: Room): void {
   });
 }
 
+function emitWordOptions(io: Server, room: Room): void {
+  if (!room.currentDrawerId) return;
+
+  io.to(room.currentDrawerId).emit("word-options", {
+    options: room.currentWordOptions,
+    remainingSeconds: GAME_CONSTANTS.WORD_SELECTION_SECONDS,
+  });
+}
+
 function createSystemMessage(roomId: string, message: string, type: ChatMessage["type"] = "system"): ChatMessage {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -44,26 +54,30 @@ function createSystemMessage(roomId: string, message: string, type: ChatMessage[
 }
 
 function emitTurnState(io: Server, room: Room): void {
-  const remainingMs = Math.max(0, (room.turnEndsAt ?? Date.now()) - Date.now());
+  const remainingMs = Math.max(0, (room.phaseEndsAt ?? room.turnEndsAt ?? Date.now()) - Date.now());
   io.to(room.id).emit("timer-updated", {
     remainingSeconds: Math.ceil(remainingMs / 1000),
+    phase: room.currentPhase,
   });
 }
 
-function stopTurnTimer(roomId: string): void {
-  const timer = turnTimers.get(roomId);
+function stopPhaseTimer(roomId: string): void {
+  const timer = phaseTimers.get(roomId);
   if (timer) {
     clearInterval(timer);
-    turnTimers.delete(roomId);
+    phaseTimers.delete(roomId);
   }
 }
 
 function endGame(io: Server, room: Room): void {
-  stopTurnTimer(room.id);
+  stopPhaseTimer(room.id);
   room.status = GameStatus.FINISHED;
   room.currentDrawerId = null;
   room.currentWord = null;
+  room.currentWordOptions = [];
+  room.currentPhase = null;
   room.turnEndsAt = null;
+  room.phaseEndsAt = null;
   room.guessedPlayerIds = [];
 
   emitPublicRoomUpdate(io, room);
@@ -71,14 +85,127 @@ function endGame(io: Server, room: Room): void {
   io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Game finished."));
 }
 
+function awardDrawerBonus(room: Room): void {
+  const drawer = room.players.find((player) => player.id === room.currentDrawerId);
+  if (drawer && room.guessedPlayerIds.length > 0) {
+    drawer.score += room.guessedPlayerIds.length * GAME_CONSTANTS.DRAWER_BONUS_PER_GUESS;
+  }
+}
+
+function startChoosingPhase(io: Server, room: Room): void {
+  stopPhaseTimer(room.id);
+  emitPublicRoomUpdate(io, room);
+  emitWordOptions(io, room);
+  io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Drawer is choosing a word."));
+  emitTurnState(io, room);
+
+  const timer = setInterval(() => {
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
+      stopPhaseTimer(room.id);
+      return;
+    }
+
+    emitTurnState(io, latestRoom);
+
+    if (latestRoom.currentPhase !== TurnPhase.CHOOSING_WORD) return;
+    if ((latestRoom.phaseEndsAt ?? 0) > Date.now()) return;
+
+    const fallbackWord = latestRoom.currentWordOptions[0];
+    if (!fallbackWord) {
+      stopPhaseTimer(room.id);
+      return;
+    }
+
+    startDrawingRound(io, latestRoom, fallbackWord);
+  }, 1000);
+
+  phaseTimers.set(room.id, timer);
+}
+
+function startDrawingRound(io: Server, room: Room, selectedWord: string): void {
+  stopPhaseTimer(room.id);
+
+  const drawingStart = turnManager.startDrawingPhase(room, selectedWord);
+  if (!drawingStart.success || !drawingStart.room) return;
+
+  emitPublicRoomUpdate(io, drawingStart.room);
+  emitWordState(io, drawingStart.room);
+  io.to(room.id).emit("clear-canvas");
+  io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Drawing round started."));
+  emitTurnState(io, drawingStart.room);
+
+  const timer = setInterval(() => {
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
+      stopPhaseTimer(room.id);
+      return;
+    }
+
+    emitTurnState(io, latestRoom);
+
+    if (latestRoom.currentPhase !== TurnPhase.DRAWING) return;
+    if ((latestRoom.turnEndsAt ?? 0) > Date.now()) return;
+
+    endRound(io, latestRoom);
+  }, 1000);
+
+  phaseTimers.set(room.id, timer);
+}
+
+function startNextTurnOrFinish(io: Server, room: Room): void {
+  const nextTurn = turnManager.advanceTurn(room);
+  if (!nextTurn.success || !nextTurn.room) return;
+
+  if (nextTurn.room.status === GameStatus.FINISHED) {
+    endGame(io, nextTurn.room);
+    return;
+  }
+
+  startChoosingPhase(io, nextTurn.room);
+}
+
+function endRound(io: Server, room: Room): void {
+  stopPhaseTimer(room.id);
+  awardDrawerBonus(room);
+  turnManager.startRoundEndPhase(room);
+  emitPublicRoomUpdate(io, room);
+  io.to(room.id).emit("round-ended", {
+    word: room.currentWord,
+    guessedPlayerIds: room.guessedPlayerIds,
+  });
+  io.to(room.id).emit(
+    "chat-message",
+    createSystemMessage(room.id, `Round ended. The word was ${room.currentWord}.`)
+  );
+  emitTurnState(io, room);
+
+  const timer = setInterval(() => {
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
+      stopPhaseTimer(room.id);
+      return;
+    }
+
+    emitTurnState(io, latestRoom);
+
+    if ((latestRoom.phaseEndsAt ?? 0) > Date.now()) return;
+
+    stopPhaseTimer(room.id);
+    startNextTurnOrFinish(io, latestRoom);
+  }, 1000);
+
+  phaseTimers.set(room.id, timer);
+}
+
 function startTurnTimer(io: Server, roomId: string): void {
-  stopTurnTimer(roomId);
+  stopPhaseTimer(roomId);
   emitTurnState(io, roomManager.getRoom(roomId)!);
 
   const timer = setInterval(() => {
     const room = roomManager.getRoom(roomId);
     if (!room || room.status !== GameStatus.PLAYING) {
-      stopTurnTimer(roomId);
+      stopPhaseTimer(roomId);
       return;
     }
 
@@ -86,14 +213,11 @@ function startTurnTimer(io: Server, roomId: string): void {
 
     if ((room.turnEndsAt ?? 0) > Date.now()) return;
 
-    const drawer = room.players.find((player) => player.id === room.currentDrawerId);
-    if (drawer && room.guessedPlayerIds.length > 0) {
-      drawer.score += GAME_CONSTANTS.DRAWER_BONUS_POINTS;
-    }
+    awardDrawerBonus(room);
 
     const nextTurn = turnManager.advanceTurn(room);
     if (!nextTurn.success || !nextTurn.room) {
-      stopTurnTimer(roomId);
+      stopPhaseTimer(roomId);
       return;
     }
 
@@ -109,7 +233,7 @@ function startTurnTimer(io: Server, roomId: string): void {
     startTurnTimer(io, roomId);
   }, 1000);
 
-  turnTimers.set(roomId, timer);
+  phaseTimers.set(roomId, timer);
 }
 
 /**
@@ -319,15 +443,37 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
 
-    // Broadcast public game state, then send private word state to each player.
+    // Broadcast public game state, then send private word options to the drawer.
     io.to(room.id).emit("game-started", createPublicRoomState(turnStart.room));
-    emitPublicRoomUpdate(io, turnStart.room);
-    emitWordState(io, turnStart.room);
-    io.to(room.id).emit("clear-canvas");
     io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Game started."));
-    startTurnTimer(io, room.id);
+    startChoosingPhase(io, turnStart.room);
 
     console.log(`Game started in room ${room.id}`);
+  });
+
+  socket.on("select-word", (payload: { roomId: string; selectedWord: string }) => {
+    const room = roomManager.getRoomForSocket(socket.id);
+    if (!room || room.id !== payload?.roomId) {
+      socket.emit("room-error", { message: "Not in this room" });
+      return;
+    }
+
+    if (room.currentDrawerId !== socket.id) {
+      socket.emit("room-error", { message: "Only the current drawer can select a word" });
+      return;
+    }
+
+    if (room.currentPhase !== TurnPhase.CHOOSING_WORD) {
+      socket.emit("room-error", { message: "Word selection is not active" });
+      return;
+    }
+
+    if (!room.currentWordOptions.includes(payload.selectedWord)) {
+      socket.emit("room-error", { message: "Selected word was not offered" });
+      return;
+    }
+
+    startDrawingRound(io, room, payload.selectedWord);
   });
 
   /**
@@ -341,32 +487,22 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
 
+    if (room.currentPhase !== TurnPhase.DRAWING) {
+      socket.emit("room-error", { message: "Guesses are only open while drawing" });
+      return;
+    }
+
     if (!roomManager.isPlayerHost(room.id, socket.id)) {
       socket.emit("room-error", { message: "Only the host can advance turns" });
       return;
     }
 
-    const drawer = room.players.find((player) => player.id === room.currentDrawerId);
-    if (drawer && room.guessedPlayerIds.length > 0) {
-      drawer.score += GAME_CONSTANTS.DRAWER_BONUS_POINTS;
-    }
-
-    const nextTurn = turnManager.advanceTurn(room);
-    if (!nextTurn.success || !nextTurn.room) {
-      socket.emit("room-error", { message: nextTurn.error });
+    if (room.currentPhase === TurnPhase.DRAWING) {
+      endRound(io, room);
       return;
     }
 
-    if (nextTurn.room.status === GameStatus.FINISHED) {
-      endGame(io, nextTurn.room);
-      return;
-    }
-
-    emitPublicRoomUpdate(io, nextTurn.room);
-    emitWordState(io, nextTurn.room);
-    io.to(room.id).emit("clear-canvas");
-    io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Next turn started."));
-    startTurnTimer(io, room.id);
+    startNextTurnOrFinish(io, room);
 
     console.log(`Next turn started in room ${room.id}`);
   });
@@ -406,9 +542,14 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
     if (room.currentWord && guess.toLowerCase() === room.currentWord.toLowerCase()) {
       room.guessedPlayerIds.push(socket.id);
-      player.score += GAME_CONSTANTS.CORRECT_GUESS_POINTS;
+      const guessRank = room.guessedPlayerIds.length - 1;
+      const points = Math.max(
+        GAME_CONSTANTS.MIN_GUESS_POINTS,
+        GAME_CONSTANTS.CORRECT_GUESS_POINTS - guessRank * GAME_CONSTANTS.GUESS_POINT_STEP
+      );
+      player.score += points;
 
-      io.to(room.id).emit("correct-guess", { playerId: socket.id, playerName: player.name });
+      io.to(room.id).emit("correct-guess", { playerId: socket.id, playerName: player.name, points });
       io.to(room.id).emit(
         "chat-message",
         createSystemMessage(room.id, `${player.name} guessed correctly.`, "correct")
@@ -417,23 +558,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
       const guessers = room.players.filter((roomPlayer) => roomPlayer.id !== room.currentDrawerId);
       if (guessers.length > 0 && room.guessedPlayerIds.length >= guessers.length) {
-        const drawer = room.players.find((roomPlayer) => roomPlayer.id === room.currentDrawerId);
-        if (drawer) {
-          drawer.score += GAME_CONSTANTS.DRAWER_BONUS_POINTS;
-        }
-        const nextTurn = turnManager.advanceTurn(room);
-        if (!nextTurn.success || !nextTurn.room) return;
-
-        if (nextTurn.room.status === GameStatus.FINISHED) {
-          endGame(io, nextTurn.room);
-          return;
-        }
-
-        emitPublicRoomUpdate(io, nextTurn.room);
-        emitWordState(io, nextTurn.room);
-        io.to(room.id).emit("clear-canvas");
-        io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Everyone guessed. Next turn."));
-        startTurnTimer(io, room.id);
+        endRound(io, room);
       }
       return;
     }
@@ -473,6 +598,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
 
+    stopPhaseTimer(roomId);
     console.log(`Player left room ${roomId}. Room deleted because it is empty.`);
   });
 

@@ -18,6 +18,11 @@ export function getRandomWord(): string {
   return WORDS[index]!;
 }
 
+export function getRandomWordOptions(count: number): string[] {
+  const shuffled = [...WORDS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, WORDS.length));
+}
+
 export function getHiddenWord(word: string | null): string {
   if (!word) return "";
 

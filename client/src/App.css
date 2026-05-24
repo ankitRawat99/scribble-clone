@@ -486,6 +486,27 @@ input:focus {
   border-color: rgba(34, 197, 94, 0.36);
 }
 
+.word-selection,
+.round-reveal {
+  min-height: 118px;
+  padding: 14px;
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  animation: rise-in 260ms ease both;
+}
+
+.word-option-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.round-reveal {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(245, 158, 11, 0.1);
+}
+
 .canvas-shell {
   min-height: 0;
   display: grid;
@@ -638,6 +659,10 @@ input:focus {
   }
 
   .chat-form {
+    grid-template-columns: 1fr;
+  }
+
+  .word-option-grid {
     grid-template-columns: 1fr;
   }
 }

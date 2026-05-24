@@ -4,30 +4,43 @@ import Button from "../components/ui/Button";
 import Timer from "../components/ui/Timer";
 import { socket } from "../socket/socket";
 import PlayerSidebar from "./PlayerSidebar";
+import RoundReveal from "./RoundReveal";
 import WordDisplay from "./WordDisplay";
-import type { ChatMessage, Room, WordState } from "./game.types";
+import WordSelection from "./WordSelection";
+import type { ChatMessage, Room, WordOptionsState, WordState } from "./game.types";
 
 interface GameScreenProps {
   room: Room;
   isHost: boolean;
   wordState: WordState;
+  wordOptions: WordOptionsState;
+  revealedWord: string | null;
   messages: ChatMessage[];
   remainingSeconds: number;
   onLeaveRoom: () => void;
   onSubmitGuess: (guess: string) => void;
+  onSelectWord: (word: string) => void;
 }
 
 function GameScreen({
   room,
   isHost,
   wordState,
+  wordOptions,
+  revealedWord,
   messages,
   remainingSeconds,
   onLeaveRoom,
   onSubmitGuess,
+  onSelectWord,
 }: GameScreenProps) {
   const currentDrawer = room.players.find((player) => player.id === room.currentDrawerId);
-  const canGuess = room.status === "playing" && room.currentDrawerId !== socket.id;
+  const isDrawer = room.currentDrawerId === socket.id;
+  const canGuess =
+    room.status === "playing" &&
+    room.currentPhase === "drawing" &&
+    !isDrawer &&
+    !room.guessedPlayerIds.includes(socket.id || "");
 
   const handleNextTurn = () => {
     if (!isHost) return;
@@ -70,9 +83,25 @@ function GameScreen({
             )}
           </div>
 
-          <WordDisplay wordState={wordState} />
+          {room.currentPhase === "choosing-word" && (
+            <WordSelection
+              room={room}
+              wordOptions={wordOptions}
+              remainingSeconds={remainingSeconds}
+              isDrawer={isDrawer}
+              onSelectWord={onSelectWord}
+            />
+          )}
 
-          <Canvas roomId={room.id} roomStatus={room.status} currentDrawerId={room.currentDrawerId} />
+          {room.currentPhase === "round-ended" && <RoundReveal revealedWord={revealedWord} />}
+
+          {room.currentPhase === "drawing" && <WordDisplay wordState={wordState} />}
+
+          <Canvas
+            roomId={room.id}
+            roomStatus={room.status}
+            currentDrawerId={room.currentPhase === "drawing" ? room.currentDrawerId : null}
+          />
 
           <div className="game-actions">
             <Button type="button" variant="danger" onClick={onLeaveRoom}>

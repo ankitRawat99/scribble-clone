@@ -1,4 +1,4 @@
-import { Room, Player, GameStatus } from "../types/room.types";
+import { Room, Player, GameStatus, TurnPhase } from "../types/room.types";
 
 // ============================================
 // ROOM CONSTANTS
@@ -117,10 +117,13 @@ export function createRoom(roomId: string, hostId: string): Room {
     hostId: hostId, // First player is host
     currentDrawerId: null,
     currentWord: null,
+    currentWordOptions: [],
+    currentPhase: null,
     currentTurnIndex: 0,
     currentRound: 1,
     maxRounds: 3,
     turnEndsAt: null,
+    phaseEndsAt: null,
     guessedPlayerIds: [],
     status: GameStatus.WAITING, // Start in waiting state
     createdAt: Date.now(),
@@ -353,7 +356,7 @@ export function validatePlayerCanDraw(
     return { valid: false, error: "Room does not exist" };
   }
 
-  if (room.status !== GameStatus.PLAYING) {
+  if (room.status !== GameStatus.PLAYING || room.currentPhase !== TurnPhase.DRAWING) {
     return { valid: false, error: "Drawing is only allowed while the game is playing" };
   }
 
@@ -384,7 +387,7 @@ export function validatePlayerCanClearCanvas(
     return { valid: false, error: "Room does not exist" };
   }
 
-  if (room.status !== GameStatus.PLAYING) {
+  if (room.status !== GameStatus.PLAYING || room.currentPhase !== TurnPhase.DRAWING) {
     return { valid: false, error: "Canvas can only be cleared while the game is playing" };
   }
 
