@@ -85,7 +85,12 @@ export function floodFill(
   const w = canvas.width;
   const h = canvas.height;
 
-  if (px < 0 || py < 0 || px >= w || py >= h) return;
+  console.log("[floodFill] Input:", { startX, startY, dpr, px, py, w, h, fillHex });
+
+  if (px < 0 || py < 0 || px >= w || py >= h) {
+    console.warn("[floodFill] Coordinates out of bounds:", { px, py, w, h });
+    return;
+  }
 
   // Reset transform to identity for getImageData/putImageData
   // These methods work on the raw bitmap and should not be affected by transforms,
@@ -105,6 +110,12 @@ export function floodFill(
 
   const [fillR, fillG, fillB, fillA] = hexToRgba(fillHex);
 
+  console.log("[floodFill] Colors sampled:", {
+    targetRGBA: [targetR, targetG, targetB, targetA],
+    fillRGBA: [fillR, fillG, fillB, fillA],
+    FILL_TOLERANCE
+  });
+
   // If seed color already matches fill color, nothing to do
   if (
     Math.abs(targetR - fillR) <= FILL_TOLERANCE &&
@@ -112,6 +123,7 @@ export function floodFill(
     Math.abs(targetB - fillB) <= FILL_TOLERANCE &&
     Math.abs(targetA - fillA) <= FILL_TOLERANCE
   ) {
+    console.log("[floodFill] Seed color matches fill color. Aborting.");
     ctx.restore();
     return;
   }
@@ -143,7 +155,10 @@ export function floodFill(
   }
 
   while (stack.length > 0) {
-    if (pixelCount >= MAX_PIXELS) break; // Safety cap
+    if (pixelCount >= MAX_PIXELS) {
+      console.warn("[floodFill] Max pixels safety cap reached:", MAX_PIXELS);
+      break; // Safety cap
+    }
 
     const [y, seedX] = stack.pop()!;
     if (y < 0 || y >= h) continue;
@@ -182,6 +197,7 @@ export function floodFill(
     }
   }
 
+  console.log("[floodFill] Fill complete. Total pixels painted:", pixelCount);
   ctx.putImageData(imageData, 0, 0);
   ctx.restore(); // Restore the DPR transform
 }

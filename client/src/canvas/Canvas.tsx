@@ -174,11 +174,26 @@ function Canvas({ roomId, roomStatus, currentDrawerId }: CanvasProps) {
      * to ensure they see the exact same result as all other clients.
      */
     const handleFillCanvas = (data: FillData) => {
-      if (data.roomId !== roomId) return;
+      console.log("Canvas.tsx: handleFillCanvas: Received fill-canvas event from server:", data);
+      if (data.roomId !== roomId) {
+        console.warn("Canvas.tsx: handleFillCanvas: Room ID mismatch:", { eventRoomId: data.roomId, currentRoomId: roomId });
+        return;
+      }
+      // If we are the drawer, we already applied the fill locally!
+      // Skip to avoid double-painting and duplicate history entries.
+      if (currentDrawerId === socket.id) {
+        console.log("Canvas.tsx: handleFillCanvas: We are the drawer, ignoring echoed event.");
+        return;
+      }
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext("2d");
-      if (!canvas || !ctx) return;
+      if (!canvas || !ctx) {
+        console.warn("Canvas.tsx: handleFillCanvas: Canvas or context not available:", { canvas: !!canvas, ctx: !!ctx });
+        return;
+      }
       floodFill(ctx, data.x, data.y, data.color);
+      // Track fill in local history so it survives resize/replay
+      canvasHistoryRef.current.push({ type: "fill", fill: data });
     };
 
     socket.on("draw-line", handleRemoteDraw);
@@ -255,6 +270,7 @@ function Canvas({ roomId, roomStatus, currentDrawerId }: CanvasProps) {
   // ─────────────────────────────────────────────
 
   const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    console.log("Canvas.tsx: handleMouseDown:", { activeTool, canDraw, button: event.button });
     if (!canDraw || event.button !== 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -264,8 +280,17 @@ function Canvas({ roomId, roomStatus, currentDrawerId }: CanvasProps) {
     // Fill tool: click triggers fill immediately (no drag)
     if (activeTool === "fill") {
       const fillData: FillData = { roomId, x: point.x, y: point.y, color };
-      // Emit to server — server broadcasts to ALL including us.
-      // We don't apply fill locally here to avoid a double-fill race condition.
+      console.log("Canvas.tsx: handleMouseDown: Emitting fill-canvas to server:", fillData);
+      
+      // Local-first: Apply fill locally immediately
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        floodFill(ctx, fillData.x, fillData.y, fillData.color);
+      }
+      // Track fill in local history so it survives resize/replay
+      canvasHistoryRef.current.push({ type: "fill", fill: fillData });
+
+      // Emit to server — server broadcasts to others.
       socket.emit("fill-canvas", fillData);
       return;
     }
@@ -352,7 +377,18 @@ function Canvas({ roomId, roomStatus, currentDrawerId }: CanvasProps) {
     const point = getCanvasPoint(canvas, touch);
 
     if (activeTool === "fill") {
-      socket.emit("fill-canvas", { roomId, x: point.x, y: point.y, color });
+      const fillData: FillData = { roomId, x: point.x, y: point.y, color };
+      console.log("Canvas.tsx: handleTouchStart: Emitting fill-canvas to server:", fillData);
+
+      // Local-first: Apply fill locally immediately
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        floodFill(ctx, fillData.x, fillData.y, fillData.color);
+      }
+      // Track fill in local history so it survives resize/replay
+      canvasHistoryRef.current.push({ type: "fill", fill: fillData });
+
+      socket.emit("fill-canvas", fillData);
       return;
     }
 

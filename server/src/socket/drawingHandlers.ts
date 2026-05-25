@@ -185,17 +185,27 @@ export function registerDrawingHandlers(io: Server, socket: Socket): void {
    * Broadcasts to ALL clients (including drawer) — drawer waits for this event.
    */
   socket.on("fill-canvas", (data: FillData) => {
+    console.log("drawingHandlers.ts: fill-canvas: received event from socket.id =", socket.id, "data =", data);
     const fillValidation = validateFillData(data);
     if (!fillValidation.valid) {
+      console.warn("drawingHandlers.ts: fill-canvas: fillValidation failed:", fillValidation.error);
       socket.emit("room-error", { message: fillValidation.error });
       return;
     }
 
     const room = roomManager.getRoomForSocket(socket.id);
-    if (!room || room.id !== data.roomId) return;
+    if (!room) {
+      console.warn("drawingHandlers.ts: fill-canvas: room not found for socket.id =", socket.id);
+      return;
+    }
+    if (room.id !== data.roomId) {
+      console.warn("drawingHandlers.ts: fill-canvas: room ID mismatch:", { socketRoomId: room.id, dataRoomId: data.roomId });
+      return;
+    }
 
     const drawValidation = roomManager.validatePlayerCanDraw(data.roomId, socket.id);
     if (!drawValidation.valid) {
+      console.warn("drawingHandlers.ts: fill-canvas: validatePlayerCanDraw failed:", drawValidation.error);
       socket.emit("room-error", { message: drawValidation.error });
       return;
     }
@@ -203,9 +213,11 @@ export function registerDrawingHandlers(io: Server, socket: Socket): void {
     // Store fill in UNIFIED history
     const history = ensureHistory(data.roomId);
     history.push({ type: "fill", fill: data });
+    console.log("drawingHandlers.ts: fill-canvas: saved to history. history length =", history.length);
 
-    // Broadcast to ALL clients including the drawer
-    io.to(data.roomId).emit("fill-canvas", data);
+    // Broadcast to other clients (drawer already applied it locally)
+    console.log("drawingHandlers.ts: fill-canvas: broadcasting fill-canvas to other clients in room:", data.roomId);
+    socket.to(data.roomId).emit("fill-canvas", data);
   });
 
   /**
