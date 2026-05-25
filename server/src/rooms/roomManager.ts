@@ -1,4 +1,5 @@
 import { Room, Player, GameStatus, TurnPhase } from "../types/room.types";
+import crypto from "crypto";
 
 // ============================================
 // ROOM CONSTANTS
@@ -10,6 +11,7 @@ const ROOM_CONSTANTS = {
   MAX_PLAYER_NAME_LENGTH: 20,
   MIN_ROOM_ID_LENGTH: 1,
   MAX_ROOM_ID_LENGTH: 50,
+  RECONNECT_GRACE_SECONDS: 5,
 };
 
 // Global room storage - backend owns all room state
@@ -17,6 +19,70 @@ const rooms = new Map<string, Room>();
 
 // Track which room each socket belongs to (for cleanup on disconnect)
 const socketToRoomMap = new Map<string, string>();
+
+// ============================================
+// RECONNECT GRACE PERIOD SYSTEM
+// ============================================
+
+/**
+ * BUG 6 FIX — Reconnect Grace Period
+ *
+ * WHY: Socket.IO assigns a NEW socket.id on every reconnection. Without this system,
+ * a 1-second network blip permanently kicks the player — they lose their room, score,
+ * and turn because the server sees a "disconnect" followed by a "new stranger" connecting.
+ *
+ * HOW: When a player disconnects, instead of immediately deleting their state, we:
+ * 1. Store their Player object + roomId in a grace record (keyed by reconnectToken)
+ * 2. Start a 5-second timer
+ * 3. If the player reconnects with the same token: cancel timer, restore state
+ * 4. If timer expires: permanently remove them and advance the turn
+ */
+
+interface GraceRecord {
+  player: Player;
+  roomId: string;
+  oldSocketId: string;
+  wasDrawer: boolean;
+  timer: NodeJS.Timeout;
+}
+
+const graceRecords = new Map<string, GraceRecord>();
+
+/** Generate a cryptographically random reconnect token */
+export function generateReconnectToken(): string {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+/** Store a grace record for a disconnecting player */
+export function addGraceRecord(
+  token: string,
+  player: Player,
+  roomId: string,
+  oldSocketId: string,
+  wasDrawer: boolean,
+  timer: NodeJS.Timeout
+): void {
+  graceRecords.set(token, { player, roomId, oldSocketId, wasDrawer, timer });
+}
+
+/** Look up a grace record by reconnect token */
+export function getGraceRecord(token: string): GraceRecord | undefined {
+  return graceRecords.get(token);
+}
+
+/** Cancel and remove a grace record (on successful reconnect or expiry) */
+export function removeGraceRecord(token: string): void {
+  const record = graceRecords.get(token);
+  if (record) {
+    clearTimeout(record.timer);
+    graceRecords.delete(token);
+  }
+}
+
+/** Get the grace period duration in milliseconds */
+export function getGracePeriodMs(): number {
+  return ROOM_CONSTANTS.RECONNECT_GRACE_SECONDS * 1000;
+}
 
 // ============================================
 // VALIDATION FUNCTIONS
@@ -215,9 +281,12 @@ export function removePlayerFromRoom(roomId: string, playerId: string): Room | u
     console.log(`Host transferred to ${room.hostId} in room ${roomId}`);
   }
 
-  if (room.currentDrawerId === playerId) {
-    room.currentDrawerId = room.players[0]?.id ?? null;
-  }
+  // BUG 5 FIX: Do NOT silently reassign currentDrawerId here.
+  // The disconnect handler in roomHandlers.ts now handles this properly
+  // by checking if the leaving player was the drawer and triggering
+  // endRound() + startNextTurnOrFinish() to advance the game.
+  // The old code just reassigned to players[0] without advancing turns,
+  // which left the game in a broken state.
 
   // If room is now empty, delete it to prevent orphaned rooms
   if (room.players.length === 0) {
@@ -239,6 +308,15 @@ export function removePlayerBySocketId(socketId: string): Room | undefined {
   if (!roomId) return undefined;
 
   return removePlayerFromRoom(roomId, socketId);
+}
+
+/**
+ * Removes only the socket-to-room mapping entry.
+ * Used by the grace period disconnect handler which manually removes the player
+ * from room.players but still needs to clean up the socket mapping.
+ */
+export function removeSocketMapping(socketId: string): void {
+  socketToRoomMap.delete(socketId);
 }
 
 /**

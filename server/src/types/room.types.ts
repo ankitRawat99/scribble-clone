@@ -11,6 +11,8 @@ export interface Player {
   name: string;
   isReady: boolean;
   score: number;
+  /** Server-generated token for reconnect identity. Never sent to other clients. */
+  reconnectToken?: string;
 }
 
 export enum TurnPhase {
