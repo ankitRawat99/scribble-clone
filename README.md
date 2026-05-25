@@ -14,11 +14,10 @@ Players can:
 # 🚀 Live Demo
 
 ## Frontend
-(Add Vercel URL here)
+scribble-clone-alpha.vercel.app
 
 ## Backend API
-(Add Render URL here)
-
+https://scribble-clone-backend-s0k6.onrender.com
 ---
 
 # 📸 Preview
