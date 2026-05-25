@@ -36,6 +36,7 @@ function App() {
   const [screen, setScreen] = useState<Screen>("lobby");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedRounds, setSelectedRounds] = useState(3);
   const [connectionStatus, setConnectionStatus] = useState(
     socket.connected ? "Online" : "Connecting"
   );
@@ -185,7 +186,7 @@ function App() {
   };
 
   const handleToggleReady = () => socket.emit("toggle-ready");
-  const handleStartGame = () => { setIsLoading(true); socket.emit("start-game"); };
+  const handleStartGame = () => { setIsLoading(true); socket.emit("start-game", { maxRounds: selectedRounds }); };
   const handleLeaveRoom = () => { setIsLoading(true); clearReconnectToken(); socket.emit("leave-room"); };
   const handleSubmitGuess = (guess: string) => {
     if (!room) return;
@@ -202,8 +203,10 @@ function App() {
     roomId,
     error,
     isLoading,
+    selectedRounds,
     onPlayerNameChange: setPlayerName,
     onRoomIdChange: setRoomId,
+    onRoundsChange: setSelectedRounds,
     onCreateRoom: handleCreateRoom,
     onJoinRoom: handleJoinRoom,
     onToggleReady: handleToggleReady,

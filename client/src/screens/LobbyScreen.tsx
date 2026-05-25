@@ -12,8 +12,10 @@ interface LobbyScreenProps {
   roomId: string;
   error: string;
   isLoading: boolean;
+  selectedRounds: number;
   onPlayerNameChange: (value: string) => void;
   onRoomIdChange: (value: string) => void;
+  onRoundsChange: (value: number) => void;
   onCreateRoom: () => void;
   onJoinRoom: () => void;
   onToggleReady: () => void;
@@ -38,8 +40,10 @@ function LobbyScreen({
   roomId,
   error,
   isLoading,
+  selectedRounds,
   onPlayerNameChange,
   onRoomIdChange,
+  onRoundsChange,
   onCreateRoom,
   onJoinRoom,
   onToggleReady,
@@ -191,6 +195,44 @@ function LobbyScreen({
             Invite link:{" "}
             <code>{window.location.origin}/room/{room.id}</code>
           </p>
+
+          {isHost && (
+            <div className="rounds-selector">
+              <label htmlFor="rounds-input" className="rounds-label">
+                <span>Rounds</span>
+                <span className="rounds-hint">2 – 10</span>
+              </label>
+              <div className="rounds-control">
+                <button
+                  id="rounds-dec-btn"
+                  type="button"
+                  className="rounds-step-btn"
+                  onClick={() => onRoundsChange(Math.max(2, selectedRounds - 1))}
+                  disabled={selectedRounds <= 2}
+                  aria-label="Decrease rounds"
+                >
+                  −
+                </button>
+                <span id="rounds-display" className="rounds-value">{selectedRounds}</span>
+                <button
+                  id="rounds-inc-btn"
+                  type="button"
+                  className="rounds-step-btn"
+                  onClick={() => onRoundsChange(Math.min(10, selectedRounds + 1))}
+                  disabled={selectedRounds >= 10}
+                  aria-label="Increase rounds"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!isHost && (
+            <p className="rounds-info">
+              🔄 Rounds: <strong>{room.maxRounds}</strong>
+            </p>
+          )}
 
           {error && <p className="error-banner">{error}</p>}
 

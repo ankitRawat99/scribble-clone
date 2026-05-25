@@ -339,7 +339,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
   });
 
   // ── start-game ───────────────────────────────────────────────
-  socket.on("start-game", () => {
+  socket.on("start-game", (payload?: { maxRounds?: number }) => {
     const room = roomManager.getRoomForSocket(socket.id);
     if (!room) {
       socket.emit("room-error", { message: "Not in a room" });
@@ -369,7 +369,14 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
 
-    turnManager.resetTurnState(gameStart.room);
+    // Validate and apply host-selected round count (2–10), default 3
+    const rawRounds = payload?.maxRounds;
+    const maxRounds =
+      typeof rawRounds === "number" && Number.isInteger(rawRounds) && rawRounds >= 2 && rawRounds <= 10
+        ? rawRounds
+        : GAME_CONSTANTS.MAX_ROUNDS;
+
+    turnManager.resetTurnState(gameStart.room, maxRounds);
     const turnStart = turnManager.startNextTurn(gameStart.room);
     if (!turnStart.success || !turnStart.room) {
       socket.emit("room-error", { message: turnStart.error });
@@ -379,7 +386,7 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
     io.to(room.id).emit("game-started", createPublicRoomState(turnStart.room));
     io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Game started."));
     startChoosingPhase(io, turnStart.room);
-    console.log(`Game started in room ${room.id}`);
+    console.log(`Game started in room ${room.id} with ${maxRounds} rounds`);
   });
 
   // ── select-word ──────────────────────────────────────────────

@@ -188,6 +188,8 @@ export function createRoom(roomId: string, hostId: string): Room {
     currentTurnIndex: 0,
     currentRound: 1,
     maxRounds: 3,
+    turnsThisRound: 0,
+    playersPerRound: 0,
     turnEndsAt: null,
     phaseEndsAt: null,
     guessedPlayerIds: [],

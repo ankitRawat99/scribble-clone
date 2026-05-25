@@ -9,10 +9,12 @@ export function getNextDrawer(room: Room): Player | null {
   return room.players[normalizedIndex] ?? null;
 }
 
-export function resetTurnState(room: Room): Room {
+export function resetTurnState(room: Room, maxRounds?: number): Room {
   room.currentTurnIndex = GAME_CONSTANTS.INITIAL_TURN_INDEX;
+  room.turnsThisRound = 0;
+  room.playersPerRound = room.players.length;
   room.currentRound = GAME_CONSTANTS.STARTING_ROUND;
-  room.maxRounds = GAME_CONSTANTS.MAX_ROUNDS;
+  room.maxRounds = maxRounds ?? GAME_CONSTANTS.MAX_ROUNDS;
   room.currentDrawerId = null;
   room.currentWord = null;
   room.currentWordOptions = [];
@@ -83,8 +85,16 @@ export function advanceTurn(room: Room): { success: boolean; room?: Room; error?
 
   room.currentTurnIndex += 1;
 
-  if (room.currentTurnIndex > 0 && room.currentTurnIndex % room.players.length === 0) {
+  // Track turns within the current round using playersPerRound (locked at round/game start)
+  // so that mid-game player joins/leaves don't break round advancement.
+  const playersPerRound = room.playersPerRound ?? room.players.length;
+  room.turnsThisRound = (room.turnsThisRound ?? 0) + 1;
+
+  if (room.turnsThisRound >= playersPerRound) {
     room.currentRound += 1;
+    room.turnsThisRound = 0;
+    // Lock in the current player count for the next round
+    room.playersPerRound = room.players.length;
   }
 
   if (room.currentRound > room.maxRounds) {

@@ -19,6 +19,8 @@ export interface Room {
   currentTurnIndex: number;
   currentRound: number;
   maxRounds: number;
+  turnsThisRound: number;
+  playersPerRound: number;
   turnEndsAt: number | null;
   phaseEndsAt: number | null;
   guessedPlayerIds: string[];

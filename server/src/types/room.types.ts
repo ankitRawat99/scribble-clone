@@ -32,6 +32,8 @@ export interface Room {
   currentTurnIndex: number;
   currentRound: number;
   maxRounds: number;
+  turnsThisRound: number; // How many turns completed in the current round
+  playersPerRound: number; // Player count locked at round start for stable round tracking
   turnEndsAt: number | null;
   phaseEndsAt: number | null;
   guessedPlayerIds: string[];
