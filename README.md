@@ -14,7 +14,7 @@ Players can:
 # 🚀 Live Demo
 
 ## Frontend
-scribble-clone-alpha.vercel.app
+https://scribble-clone-alpha.vercel.app
 
 ## Backend API
 https://scribble-clone-backend-s0k6.onrender.com
