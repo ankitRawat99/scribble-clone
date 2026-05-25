@@ -22,11 +22,12 @@ https://scribble-clone-backend-s0k6.onrender.com
 
 # 📸 Preview
 
-(Add screenshots or GIFs here)
+![home screen](image.png)
 
 Suggested screenshots:
-- Lobby Screen
-- Gameplay Screen
+
+![gameplay screen](image-1.png)
+- 
 - Drawing Canvas
 - Chat & Guessing System
 - Final Scoreboard
