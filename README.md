@@ -26,11 +26,12 @@ https://scribble-clone-backend-s0k6.onrender.com
 
 Suggested screenshots:
 
-![gameplay screen](image-1.png)
-- 
-- Drawing Canvas
-- Chat & Guessing System
-- Final Scoreboard
+- ![gameplay screen](image-1.png)
+
+- ![drawing canvas](image-2.png)
+
+- ![chat section](image-3.png)
+
 
 ---
 
