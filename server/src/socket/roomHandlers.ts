@@ -67,12 +67,13 @@ function emitTurnState(io: Server, room: Room): void {
 function stopPhaseTimer(roomId: string): void {
   const timer = phaseTimers.get(roomId);
   if (timer) {
-    clearInterval(timer);
+    clearTimeout(timer);
     phaseTimers.delete(roomId);
   }
 }
 
 function endGame(io: Server, room: Room): void {
+  console.log(`[GAME] endGame called for room ${room.id}, status=${room.status}, round=${room.currentRound}/${room.maxRounds}`);
   stopPhaseTimer(room.id);
   room.status = GameStatus.FINISHED;
   room.currentDrawerId = null;
@@ -86,6 +87,7 @@ function endGame(io: Server, room: Room): void {
   emitPublicRoomUpdate(io, room);
   io.to(room.id).emit("game-finished", createPublicRoomState(room));
   io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Game finished."));
+  console.log(`[GAME] game-finished emitted to room ${room.id}`);
 }
 
 function awardDrawerBonus(room: Room): void {
@@ -102,28 +104,29 @@ function startChoosingPhase(io: Server, room: Room): void {
   io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Drawer is choosing a word."));
   emitTurnState(io, room);
 
-  const timer = setInterval(() => {
-    const latestRoom = roomManager.getRoom(room.id);
-    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
-      stopPhaseTimer(room.id);
+  // Tick every second to update the timer display
+  const tickInterval = setInterval(() => {
+    const r = roomManager.getRoom(room.id);
+    if (!r || r.status !== GameStatus.PLAYING || r.currentPhase !== TurnPhase.CHOOSING_WORD) {
+      clearInterval(tickInterval);
       return;
     }
-
-    emitTurnState(io, latestRoom);
-
-    if (latestRoom.currentPhase !== TurnPhase.CHOOSING_WORD) return;
-    if ((latestRoom.phaseEndsAt ?? 0) > Date.now()) return;
-
-    const fallbackWord = latestRoom.currentWordOptions[0];
-    if (!fallbackWord) {
-      stopPhaseTimer(room.id);
-      return;
-    }
-
-    startDrawingRound(io, latestRoom, fallbackWord);
+    emitTurnState(io, r);
   }, 1000);
 
-  phaseTimers.set(room.id, timer);
+  // Fire once when word-selection window closes
+  const timeoutMs = GAME_CONSTANTS.WORD_SELECTION_SECONDS * 1000;
+  const deadline = setTimeout(() => {
+    clearInterval(tickInterval);
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) return;
+    if (latestRoom.currentPhase !== TurnPhase.CHOOSING_WORD) return;
+    const fallbackWord = latestRoom.currentWordOptions[0];
+    if (!fallbackWord) return;
+    startDrawingRound(io, latestRoom, fallbackWord);
+  }, timeoutMs);
+
+  phaseTimers.set(room.id, deadline);
 }
 
 function startDrawingRound(io: Server, room: Room, selectedWord: string): void {
@@ -142,27 +145,45 @@ function startDrawingRound(io: Server, room: Room, selectedWord: string): void {
   io.to(room.id).emit("chat-message", createSystemMessage(room.id, "Drawing round started."));
   emitTurnState(io, drawingStart.room);
 
-  const timer = setInterval(() => {
-    const latestRoom = roomManager.getRoom(room.id);
-    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
-      stopPhaseTimer(room.id);
+  // Tick every second to update the timer display
+  const tickInterval = setInterval(() => {
+    const r = roomManager.getRoom(room.id);
+    if (!r || r.status !== GameStatus.PLAYING || r.currentPhase !== TurnPhase.DRAWING) {
+      clearInterval(tickInterval);
       return;
     }
-
-    emitTurnState(io, latestRoom);
-
-    if (latestRoom.currentPhase !== TurnPhase.DRAWING) return;
-    if ((latestRoom.turnEndsAt ?? 0) > Date.now()) return;
-
-    endRound(io, latestRoom);
+    emitTurnState(io, r);
   }, 1000);
 
-  phaseTimers.set(room.id, timer);
+  // Fire once when drawing time expires
+  const timeoutMs = GAME_CONSTANTS.TURN_DURATION_SECONDS * 1000;
+  const deadline = setTimeout(() => {
+    clearInterval(tickInterval);
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) return;
+    if (latestRoom.currentPhase !== TurnPhase.DRAWING) return; // already ended (all guessed)
+    endRound(io, latestRoom);
+  }, timeoutMs);
+
+  phaseTimers.set(room.id, deadline);
 }
 
 function startNextTurnOrFinish(io: Server, room: Room): void {
+  console.log(`[GAME] startNextTurnOrFinish — round=${room.currentRound}/${room.maxRounds}, turnsThisRound=${room.turnsThisRound}, status=${room.status}`);
+
+  // Room may have been finished by external event (e.g. player count dropped during round-end)
+  if (room.status === GameStatus.FINISHED) {
+    endGame(io, room);
+    return;
+  }
+
   const nextTurn = turnManager.advanceTurn(room);
-  if (!nextTurn.success || !nextTurn.room) return;
+  if (!nextTurn.success || !nextTurn.room) {
+    console.log(`[GAME] advanceTurn failed: ${nextTurn.error}`);
+    return;
+  }
+
+  console.log(`[GAME] After advanceTurn: status=${nextTurn.room.status}, round=${nextTurn.room.currentRound}/${nextTurn.room.maxRounds}`);
 
   if (nextTurn.room.status === GameStatus.FINISHED) {
     endGame(io, nextTurn.room);
@@ -187,22 +208,25 @@ function endRound(io: Server, room: Room): void {
   );
   emitTurnState(io, room);
 
-  const timer = setInterval(() => {
-    const latestRoom = roomManager.getRoom(room.id);
-    if (!latestRoom || latestRoom.status !== GameStatus.PLAYING) {
-      stopPhaseTimer(room.id);
+  // Tick every second to show the round-end countdown
+  const tickInterval = setInterval(() => {
+    const r = roomManager.getRoom(room.id);
+    if (!r || r.currentPhase !== TurnPhase.ROUND_ENDED) {
+      clearInterval(tickInterval);
       return;
     }
-
-    emitTurnState(io, latestRoom);
-
-    if ((latestRoom.phaseEndsAt ?? 0) > Date.now()) return;
-
-    stopPhaseTimer(room.id);
-    startNextTurnOrFinish(io, latestRoom);
+    emitTurnState(io, r);
   }, 1000);
 
-  phaseTimers.set(room.id, timer);
+  // Fire ONCE after the round-end pause — no status guard so it always advances
+  const deadline = setTimeout(() => {
+    clearInterval(tickInterval);
+    const latestRoom = roomManager.getRoom(room.id);
+    if (!latestRoom) return; // room was deleted (everyone left)
+    startNextTurnOrFinish(io, latestRoom);
+  }, GAME_CONSTANTS.ROUND_END_SECONDS * 1000);
+
+  phaseTimers.set(room.id, deadline);
 }
 
 // ============================================
@@ -450,6 +474,11 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
       return;
     }
 
+    // Only accept guesses while the drawing phase is active
+    if (room.status !== GameStatus.PLAYING || room.currentPhase !== TurnPhase.DRAWING) {
+      return;
+    }
+
     if (room.currentDrawerId === socket.id) {
       socket.emit("room-error", { message: "Drawer cannot submit guesses" });
       return;
@@ -490,6 +519,8 @@ export function registerRoomHandlers(io: Server, socket: Socket): void {
 
       const guessers = room.players.filter((roomPlayer) => roomPlayer.id !== room.currentDrawerId);
       if (guessers.length > 0 && room.guessedPlayerIds.length >= guessers.length) {
+        // Cancel the drawing deadline — we're ending early via all-guessed
+        stopPhaseTimer(room.id);
         endRound(io, room);
       }
       return;

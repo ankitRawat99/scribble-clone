@@ -23,6 +23,7 @@ export function resetTurnState(room: Room, maxRounds?: number): Room {
   room.phaseEndsAt = null;
   room.guessedPlayerIds = [];
 
+  console.log(`[GAME] resetTurnState → maxRounds=${room.maxRounds}, playersPerRound=${room.playersPerRound}, players=${room.players.length}`);
   return room;
 }
 
@@ -90,14 +91,18 @@ export function advanceTurn(room: Room): { success: boolean; room?: Room; error?
   const playersPerRound = room.playersPerRound ?? room.players.length;
   room.turnsThisRound = (room.turnsThisRound ?? 0) + 1;
 
+  console.log(`[GAME] advanceTurn → turnIndex=${room.currentTurnIndex}, turnsThisRound=${room.turnsThisRound}/${playersPerRound}, round=${room.currentRound}/${room.maxRounds}`);
+
   if (room.turnsThisRound >= playersPerRound) {
     room.currentRound += 1;
     room.turnsThisRound = 0;
     // Lock in the current player count for the next round
     room.playersPerRound = room.players.length;
+    console.log(`[GAME] Round advanced → now round=${room.currentRound}/${room.maxRounds}`);
   }
 
   if (room.currentRound > room.maxRounds) {
+    console.log(`[GAME] Game FINISHED after ${room.currentTurnIndex} turns`);
     room.status = GameStatus.FINISHED;
     room.currentDrawerId = null;
     room.currentWord = null;
